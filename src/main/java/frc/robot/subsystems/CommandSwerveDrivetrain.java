@@ -13,12 +13,15 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Transform2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -47,11 +50,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final SwerveRequest.SysIdSwerveRotation m_rotationCharacterization = new SwerveRequest.SysIdSwerveRotation();
 
 
-      /**
-   * April Tag Field Layout of the year.
-   */
+//       /**
+//    * April Tag Field Layout of the year.
+//    */
 //   public static final AprilTagFieldLayout fieldLayout                     = AprilTagFieldLayout.loadField(
 //       AprilTagFields.k2025ReefscapeAndyMark);
+
+  public Field2d field = new Field2d();
 
       
     /* SysId routine for characterizing translation. This is used to find PID gains for the drive motors. */
@@ -122,7 +127,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
       /**
    * Enable vision odometry updates while driving.
    */
-//   private final boolean             visionDriveTest     = false;
+  private final boolean             visionDriveTest     = false;
    /**
    * PhotonVision class to keep an accurate odometry.
    */
@@ -149,26 +154,49 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             startSimThread();
         }
 
-        // if (visionDriveTest)
-        // {
-        //   setupPhotonVision();
-        //   // Stop the odometry thread if we are using vision that way we can synchronize updates better.
+        if (visionDriveTest)
+        {
+          setupPhotonVision();
+          // Stop the odometry thread if we are using vision that way we can synchronize updates better.
         //   swerveDrive.stopOdometryThread();
-        // }
+        super.getOdometryThread().stop();
+        }
     }
 
     
-//   /**
-//    * Setup the photon vision class.
-//    */
-//   public void setupPhotonVision(){
-//     vision = new Vision(this::getPose, swerveDrive.field);
-//   }
+  /**
+   * Setup the photon vision class.
+   */
+  public void setupPhotonVision(){
+    vision = new Vision(this::getPose, field);
+  }
 
-//   public Pose2d getPose() {
-//     return getState().Pose;
-//   }
+  public Pose2d getPose() {
+    return getState().Pose;
+  }
 
+    public Pose2d getPose(double timeSeconds) {
+    Pose2d currPose = this.getPose();
+    // Rotation2d currRotation = currPose.getRotation();
+    ChassisSpeeds speeds = getState().Speeds;
+    double velocityX = speeds.vxMetersPerSecond;
+    double velocityY = speeds.vyMetersPerSecond;
+
+    double transformX = timeSeconds * velocityX;
+    double transformY = timeSeconds * velocityY;
+    Rotation2d transformRotation = new Rotation2d(timeSeconds * speeds.omegaRadiansPerSecond);
+    Transform2d transformPose = new Transform2d(transformX, transformY, transformRotation);
+    Pose2d predictedPose = currPose.plus(transformPose);
+
+    // DogLog.log("Predicted Pose", predictedPose);
+
+    return predictedPose;
+  }
+  
+  
+//   public Pose2d getx() {
+//     return super.;
+//   }
 
     /**
      * Constructs a CTRE SwerveDrivetrain using the specified constants.
@@ -277,14 +305,15 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 m_hasAppliedOperatorPerspective = true;
             });
 
-        //     if (visionDriveTest){
-        //         swerveDrive.updateOdometry();
-        //         //  alt vision.updateSwerveDrivePoseEstimation(swerveDrivePoseEstimator);
-        //         vision.updatePoseEstimation(this);
+            if (visionDriveTest){
+                super.getOdometryThread().start();
+                // swerveDrive.updateOdometry();
+                vision.updatePoseEstimation(this);
           
           
-        //   }
+          }
         }
+        field.setRobotPose(getPose());
     }
 
     private void startSimThread() {
