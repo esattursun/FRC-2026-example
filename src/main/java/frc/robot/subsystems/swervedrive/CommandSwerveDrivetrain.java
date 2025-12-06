@@ -1,4 +1,4 @@
-package frc.robot.subsystems;
+package frc.robot.subsystems.swervedrive;
 
 import static edu.wpi.first.units.Units.*;
 
@@ -7,6 +7,8 @@ import java.util.function.Supplier;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.swerve.SwerveDrivetrainConstants;
+import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
+import com.revrobotics.spark.SparkMax;
 import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
@@ -14,6 +16,7 @@ import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
@@ -26,14 +29,18 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
-
+import frc.robot.Constants;
+import frc.robot.generated.TunerConstants;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
+import frc.util.Reef.coralStationConstants.Station;
+import swervelib.math.SwerveMath;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
  * Subsystem so it can easily be used in command-based projects.
  */
-public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
+public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {4
+    private SparkMax x;
     private static final double kSimLoopPeriod = 0.005; // 5 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
@@ -128,12 +135,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
       /**
    * Enable vision odometry updates while driving.
    */
-  private final boolean             visionDriveTest     = true;
+  private final boolean             visionDriveTest     = false;
    /**
    * PhotonVision class to keep an accurate odometry.
    */
   public Vision vision;
 
+  private int value= 0;
 
 
     /**
@@ -366,4 +374,195 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     ) {
         super.addVisionMeasurement(visionRobotPoseMeters, Utils.fpgaToCurrentTime(timestampSeconds), visionMeasurementStdDevs);
     }
+
+
+    public void driveFieldOriented(ChassisSpeeds velocity){
+        double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
+        double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
+   
+   
+       SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
+               .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
+               .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+   
+           this.applyRequest(()-> 
+           drive.withVelocityX(velocity.vxMetersPerSecond).
+           withVelocityY(velocity.vyMetersPerSecond).
+           withRotationalRate(velocity.omegaRadiansPerSecond));
+       }
+
+
+
+
+    public void drive(ChassisSpeeds velocity){
+     double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
+     double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
+
+
+
+    SwerveRequest.RobotCentric robotOriented = new SwerveRequest.RobotCentric()
+    .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+
+        this.applyRequest(()-> 
+        robotOriented.withVelocityX(velocity.vxMetersPerSecond).
+        withVelocityY(velocity.vyMetersPerSecond).
+        withRotationalRate(velocity.omegaRadiansPerSecond));
+    }
+
+    public void changevalue(int value){
+        this.value = value;
+      }
+      public int getvalue(){
+        return this.value;
+      }
+
+  public Station getclosestCoralStation(){
+    double[] distances = {
+      getDistanceToTranslation(Station.AB.getStationX(), Station.AB.getStationY()),    // AB
+      getDistanceToTranslation(Station.CD.getStationX(), Station.CD.getStationY()),    // CD
+      getDistanceToTranslation(Station.EF.getStationX(), Station.EF.getStationY()),    // EF
+      getDistanceToTranslation(Station.GH.getStationX(), Station.GH.getStationY()),    // GH
+      getDistanceToTranslation(Station.IJ.getStationX(), Station.IJ.getStationY()),    // IJ
+      getDistanceToTranslation(Station.KL.getStationX(), Station.KL.getStationY())     // KL
+  };
+  String[] names = {"ab", "cd", "ef", "gh", "ij", "kl"};
+  int minIndex = findMinDistanceIndex(distances);
+  SmartDashboard.putString( "Ismi: " , names[minIndex]);
+
+  return Station.values()[minIndex];
+  }
+
+   public double getDistanceToTranslation(double x, double y){
+
+    Translation2d robotTranslation =getPose().getTranslation();
+    Translation2d CoralStationTranslation = new Translation2d(x,y);//3.30 3.9 , 3.9, 3
+
+    double coralStationDistance = robotTranslation.getDistance(CoralStationTranslation);
+    return coralStationDistance;
+  }
+
+  public static int findMinDistanceIndex(double[] distances) {
+    int minIndex = 0;
+    for (int i = 1; i < distances.length; i++) {
+        if (distances[i] < distances[minIndex]) {
+            minIndex = i;
+        }
+    }
+    return minIndex;
+}
+public Station getclosestCoralStationx(){
+    double[] distances = {
+      getDistanceToTranslation(Station.AB.getStationXx(), Station.AB.getStationYy()),    // AB
+      getDistanceToTranslation(Station.CD.getStationXx(), Station.CD.getStationYy()),    // CD
+      getDistanceToTranslation(Station.EF.getStationXx(), Station.EF.getStationYy()),    // EF
+      getDistanceToTranslation(Station.GH.getStationXx(), Station.GH.getStationYy()),    // GH
+      getDistanceToTranslation(Station.IJ.getStationXx(), Station.IJ.getStationYy()),    // IJ
+      getDistanceToTranslation(Station.KL.getStationXx(), Station.KL.getStationYy())     // KL
+  };
+ 
+  String[] names = {"ab", "cd", "ef", "gh", "ij", "kl"};
+  int minIndex = findMinDistanceIndex(distances);
+  SmartDashboard.putString( "Ismi: " , names[minIndex]);
+
+  return Station.values()[minIndex];
+}
+/**
+ * @param vertical The vertical change relative to the Coral Station center.
+ * @param horizontal The horizontal change relative to the Coral Station center.
+ * @return The true position of the Coral Station as a {@link Pose2d}.
+ */
+public Pose2d gettrueCoralStationPose(double vertical,double horizontal ){
+    Station station = getclosestCoralStation();
+    
+    Pose2d coralStationpose2 =Vision.getAprilTagPose(station.getStationTagId(), new Transform2d(new Translation2d(),new Rotation2d()));
+    Pose2d trueCoralStationPose = coralStationpose2.plus( new Transform2d(vertical, horizontal, Rotation2d.fromDegrees(180)));
+     
+
+        return trueCoralStationPose;     
+    }
+
+/**
+ * @param vertical The vertical change relative to the Coral Station center.
+ * @param horizontal The horizontal change relative to the Coral Station center.
+ * @return The true position of the Coral Station as a {@link Pose2d}.
+ */
+public Pose2d gettrueCoralStationPose(Station wantedstation,double vertical,double horizontal ){
+    Station station = wantedstation;
+  
+    Pose2d coralStationpose2 =Vision.getAprilTagPose(station.getStationTagId(), new Transform2d(new Translation2d(),new Rotation2d()));
+      Pose2d trueCoralStationPose = coralStationpose2.plus( new Transform2d(vertical, horizontal, Rotation2d.fromDegrees(180)));
+       
+        return trueCoralStationPose;     
+    }
+    public Pose2d gettrueCoralStationPosex(double vertical,double horizontal ){
+      Station station = getclosestCoralStationx();
+      
+      Pose2d coralStationpose2 =Vision.getAprilTagPose(station.getStationTagIdx(), new Transform2d(new Translation2d(),new Rotation2d()));
+      Pose2d trueCoralStationPose = coralStationpose2.plus( new Transform2d(vertical, horizontal, Rotation2d.fromDegrees(180)));
+       
+  
+          return trueCoralStationPose;     
+      }
+      public Pose2d getnetpose(double vertical ){
+      
+        Pose2d coralStationpose2 =Vision.getAprilTagPose(isRedAlliance()?5 : 14 , new Transform2d(new Translation2d(),new Rotation2d()));
+        Pose2d trueCoralStationPose = coralStationpose2.plus( new Transform2d(vertical, 0.5, Rotation2d.fromDegrees(180)));
+         
+    
+            return trueCoralStationPose;
+        }
+  /**
+   * Checks if the alliance is red, defaults to false if alliance isn't available.
+   *
+   * @return true if the red alliance, false if blue. Defaults to false if none is available.
+   */
+  public boolean isRedAlliance()
+  {
+    var alliance = DriverStation.getAlliance();
+    return alliance.isPresent() ? alliance.get() == DriverStation.Alliance.Red : false;
+  }
+
+
+
+
+  /**
+   * Get the chassis speeds based on controller input of 1 joystick and one angle. Control the robot at an offset of
+   * 90deg.
+   *
+   * @param xInput X joystick input for the robot to move in the X direction.
+   * @param yInput Y joystick input for the robot to move in the Y direction.
+   * @param angle  The angle in as a {@link Rotation2d}.
+   * @return {@link ChassisSpeeds} which can be sent to the Swerve Drive.
+   */
+  public ChassisSpeeds getTargetSpeeds(double xInput, double yInput, Rotation2d angle)
+  {
+    Translation2d scaledInputs = SwerveMath.cubeTranslation(new Translation2d(xInput, yInput));
+
+    return SwerveDrive.swerveController.getTargetSpeeds(scaledInputs.getX(),
+                                                        scaledInputs.getY(),
+                                                        angle.getRadians(),
+                                                        getPose().getRotation().getRadians(),
+                                                        TunerConstants.kSpeedAt12VoltsMps);
+  }
+
+
+
+  public void drive(Translation2d translation, double rotation, boolean fieldRelative)
+  {
+    if(fieldRelative){
+     drive(new ChassisSpeeds(translation.getX(),
+        translation.getY(),
+              rotation));
+    }else{
+        driveFieldOriented(new ChassisSpeeds(translation.getX(),
+        translation.getY(),
+              rotation));
+    }
+}
+
+   public void brake(){
+    this.applyRequest(()-> new SwerveRequest.SwerveDriveBrake());
+
+   }
 }
