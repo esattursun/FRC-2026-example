@@ -8,21 +8,31 @@ import static edu.wpi.first.units.Units.*;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
+import com.pathplanner.lib.commands.FollowPathCommand;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
+import frc.robot.Constants.ElevatorConst;
 import frc.robot.commands.swervedrive.auto.autoalignment;
+import frc.robot.commands.swervedrive.auto.backfeed;
+import frc.robot.commands.swervedrive.auto.backfeed2;
 import frc.robot.commands.swervedrive.auto.centeralignment;
 import frc.robot.commands.swervedrive.auto.centeralignmentx;
 import frc.robot.commands.upsystemCommands.AutoActuation;
 import frc.robot.commands.upsystemCommands.DelayedScore;
 import frc.robot.commands.upsystemCommands.HardScore;
 import frc.robot.commands.upsystemCommands.Score;
+import frc.robot.commands.upsystemCommands.intake;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.Elevator;
 import frc.robot.subsystems.Elevator.ElevatorStates;
@@ -37,6 +47,7 @@ public class RobotContainer {
     private double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
+    
     /* Setting up bindings for necessary control of the swerve drive platform */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
             .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
@@ -62,8 +73,16 @@ public class RobotContainer {
     .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1)
     .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
+    private final SendableChooser<Command> autoChooser;
+
     public RobotContainer() {
         configureBindings();
+        addnamedCommands();
+        autoChooser = AutoBuilder.buildAutoChooser("Tests");
+        SmartDashboard.putData("Auto Mode", autoChooser);
+
+        // Warmup PathPlanner to avoid Java pauses
+        FollowPathCommand.warmupCommand().schedule();
 
 
       CATCHER_RIGHT.setDefaultCommand(Commands.run(()-> CATCHER_RIGHT.setmotor(0), CATCHER_RIGHT));
@@ -74,7 +93,37 @@ public class RobotContainer {
       ELEVATOR.setDefaultCommand(Commands.run(()-> ELEVATOR.setState(ElevatorStates.MANUAL), ELEVATOR));
     }
 
+    private void addnamedCommands(){
+              NamedCommands.registerCommand("leftalignment",new autoalignment(drivetrain,ELEVATOR,0.51,-0.16));// 75 16
+      NamedCommands.registerCommand("rightalignment",new autoalignment(drivetrain,ELEVATOR,0.51,0.16));
+      NamedCommands.registerCommand("l4", new AutoActuation(ELEVATOR, PIVOT, upsystemstates.l4).until(()-> ElevatorConst.getfinish() == 1));
+      NamedCommands.registerCommand("underalgae", new AutoActuation(ELEVATOR, PIVOT, upsystemstates.underalgae).until(()-> ElevatorConst.getfinish() == 1));
+
+
+      NamedCommands.registerCommand("backfeed", new backfeed(drivetrain));
+      NamedCommands.registerCommand("backfeed2", new backfeed2(drivetrain));
+
+      NamedCommands.registerCommand("source", new AutoActuation(ELEVATOR, PIVOT, upsystemstates.source).withTimeout(1.3));
+      NamedCommands.registerCommand("halfsource", new AutoActuation(ELEVATOR, PIVOT, upsystemstates.source).withTimeout(0.53));
+
+      NamedCommands.registerCommand("score",  new HardScore(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(0.7));
+      NamedCommands.registerCommand("score2",  new HardScore(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(0.7));
+
+      // NamedCommands.registerCommand("intake",  new intake(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(1.25));
+      NamedCommands.registerCommand("intake",  new SequentialCommandGroup(new intake(CATCHER_LEFT, CATCHER_RIGHT).until(()-> CATCHER_RIGHT.hascoral()),
+      new intake(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(0.2)));
+
+      NamedCommands.registerCommand("catchalgae",  new SequentialCommandGroup(new intake(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(4)));
+
+      NamedCommands.registerCommand("centeralignment",new autoalignment(drivetrain,ELEVATOR,0.65,0));
+
+      NamedCommands.registerCommand("1secondintake",  new intake(CATCHER_LEFT, CATCHER_RIGHT).withTimeout(.61));
+
+    }
+    
+    
     private void configureBindings() {
+
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
         drivetrain.setDefaultCommand(
@@ -156,6 +205,8 @@ public class RobotContainer {
     }
 
     public Command getAutonomousCommand() {
-        return Commands.print("No autonomous command configured");
+        return autoChooser.getSelected();
+
+        // return Commands.print("No autonomous command configured");
     }
 }
