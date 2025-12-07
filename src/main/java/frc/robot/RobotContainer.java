@@ -16,6 +16,9 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
+import frc.robot.commands.swervedrive.auto.autoalignment;
+import frc.robot.commands.swervedrive.auto.centeralignment;
+import frc.robot.commands.swervedrive.auto.centeralignmentx;
 import frc.robot.commands.upsystemCommands.AutoActuation;
 import frc.robot.commands.upsystemCommands.DelayedScore;
 import frc.robot.commands.upsystemCommands.HardScore;
@@ -46,12 +49,12 @@ public class RobotContainer {
     public final static CommandXboxController joystick = new CommandXboxController(0);
     private final static CommandXboxController joystick2 = new CommandXboxController(1);
     
-            public final static catcher_right CATCHER_RIGHT = new catcher_right();
-        public final static catcher_left CATCHER_LEFT = new catcher_left();
+    public final static catcher_right CATCHER_RIGHT = new catcher_right();
+    public final static catcher_left CATCHER_LEFT = new catcher_left();
     
-        public final static Wrist PIVOT = new Wrist(()-> MathUtil.applyDeadband(joystick2.getRightY(),0.05));
+    public final static Wrist PIVOT = new Wrist(()-> MathUtil.applyDeadband(joystick2.getRightY(),0.05));
     
-        public final static Elevator ELEVATOR = new Elevator(()-> joystick2.getLeftY());
+    public final static Elevator ELEVATOR = new Elevator(()-> joystick2.getLeftY());
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
 
@@ -125,7 +128,12 @@ public class RobotContainer {
         drivetrain.registerTelemetry(logger::telemeterize);
 
 
-
+        //coral align
+        joystick.rightBumper().whileTrue(new autoalignment(drivetrain,ELEVATOR, 0.61, 0.16));
+        joystick.leftBumper().whileTrue(new autoalignment(drivetrain,ELEVATOR,0.61,-0.16));
+        //alg align
+        joystick.b().whileTrue(new centeralignment(drivetrain,ELEVATOR,0.51,0));
+        joystick.x().whileTrue(new centeralignmentx(drivetrain,ELEVATOR,0.51,0));
 
 
         
