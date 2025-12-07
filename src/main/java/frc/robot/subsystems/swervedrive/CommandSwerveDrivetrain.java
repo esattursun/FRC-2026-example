@@ -8,11 +8,12 @@ import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.swerve.SwerveDrivetrainConstants;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
-import com.revrobotics.spark.SparkMax;
 import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform2d;
@@ -29,18 +30,15 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
-import frc.robot.Constants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 import frc.util.Reef.coralStationConstants.Station;
-import swervelib.math.SwerveMath;
-
+    
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
  * Subsystem so it can easily be used in command-based projects.
  */
-public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {4
-    private SparkMax x;
+public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
     private static final double kSimLoopPeriod = 0.005; // 5 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
@@ -51,6 +49,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
     /* Keep track if we've ever applied the operator perspective before or not */
     private boolean m_hasAppliedOperatorPerspective = false;
+
+    // Angle PID and Slew Rate Limiter for smoother driving
+    private final PIDController thetaController = new PIDController(0.118, 0, 0); // Kp, Ki, Kd - Bunları ayarlamanız gerekecek!
+    private final SlewRateLimiter xLimiter = new SlewRateLimiter(3);
+    private final SlewRateLimiter yLimiter = new SlewRateLimiter(3);
+    private final SlewRateLimiter angleLimiter = new SlewRateLimiter(3);
+    private final double maxAngularVelocity = Math.PI * 2; // Maksimum dönüş hızı (rad/s). Bunu da ayarlayabilirsiniz.
 
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -144,6 +149,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
   private int value= 0;
 
 
+// private final PIDController thetaController=new PIDController(2.5, 0, 0);
+// config.headingPIDF.createPIDController();
+
+// private SlewRateLimiter xLimiter;    
+// private SlewRateLimiter yLimiter;
+// private SlewRateLimiter angleLimiter;
+
+// private final double maxAngularVelocity = Math.PI * 4; // örnek
+
+
     /**
      * Constructs a CTRE SwerveDrivetrain using the specified constants.
      * <p>
@@ -158,7 +173,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SwerveDrivetrainConstants drivetrainConstants,
         SwerveModuleConstants<?, ?, ?>... modules
     ) {
+
+        
         super(drivetrainConstants, modules);
+        
+        // Configure the heading PID controller for continuous input
+        thetaController.enableContinuousInput(-Math.PI, Math.PI);
+
         if (Utils.isSimulation()) {
             startSimThread();
         }
@@ -170,6 +191,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         //   swerveDrive.stopOdometryThread();
         super.getOdometryThread().stop();
         }
+        thetaController.enableContinuousInput(-Math.PI, Math.PI);
+
     }
 
     
@@ -527,23 +550,69 @@ public Pose2d gettrueCoralStationPose(Station wantedstation,double vertical,doub
 
 
   /**
-   * Get the chassis speeds based on controller input of 1 joystick and one angle. Control the robot at an offset of
-   * 90deg.
+   * High-level method to get target speeds for driving, supporting field-relative control.
+   * This is the recommended method to call from your commands.
    *
-   * @param xInput X joystick input for the robot to move in the X direction.
-   * @param yInput Y joystick input for the robot to move in the Y direction.
-   * @param angle  The angle in as a {@link Rotation2d}.
-   * @return {@link ChassisSpeeds} which can be sent to the Swerve Drive.
+   * @param xInput Joystick X input (-1 to 1)
+   * @param yInput Joystick Y input (-1 to 1)
+   * @param targetAngle The desired robot heading
+   * @param fieldRelative True for field-oriented, false for robot-oriented
+   * @return The calculated ChassisSpeeds
    */
-  public ChassisSpeeds getTargetSpeeds(double xInput, double yInput, Rotation2d angle)
+  public ChassisSpeeds getTargetSpeeds(double xInput, double yInput, Rotation2d targetAngle)
   {
-    Translation2d scaledInputs = SwerveMath.cubeTranslation(new Translation2d(xInput, yInput));
+    // , boolean fieldRelative
+    boolean fieldRelative = true;
+      double maxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
+      double currentAngleRadians = getPose().getRotation().getRadians();
+      double targetAngleRadians = targetAngle.getRadians();
 
-    return SwerveDrive.swerveController.getTargetSpeeds(scaledInputs.getX(),
-                                                        scaledInputs.getY(),
-                                                        angle.getRadians(),
-                                                        getPose().getRotation().getRadians(),
-                                                        TunerConstants.kSpeedAt12VoltsMps);
+      ChassisSpeeds robotCentricSpeeds = getTargetSpeeds(xInput, yInput, targetAngleRadians, currentAngleRadians, maxSpeed);
+
+      if (fieldRelative) {
+          return ChassisSpeeds.fromFieldRelativeSpeeds(
+              robotCentricSpeeds.vxMetersPerSecond,
+              robotCentricSpeeds.vyMetersPerSecond,
+              robotCentricSpeeds.omegaRadiansPerSecond,
+              getPose().getRotation()
+          );
+      } else {
+          return robotCentricSpeeds;
+      }
+  }
+
+  /** Internal function based on the user's preferred style */
+  private ChassisSpeeds getTargetSpeeds(double xInput, double yInput,
+                                       double targetAngleRadians, double currentHeadingAngleRadians,
+                                       double maxSpeed)
+  {
+      double x = Math.pow(xInput, 3) * maxSpeed;
+      double y = Math.pow(yInput, 3) * maxSpeed;
+
+      return getRawTargetSpeeds(x, y, targetAngleRadians, currentHeadingAngleRadians);
+  }
+
+  /** Internal function based on the user's preferred style */
+  private ChassisSpeeds getRawTargetSpeeds(double xSpeed, double ySpeed,
+                                          double targetHeadingAngleRadians,
+                                          double currentHeadingAngleRadians)
+  {
+      return getRawTargetSpeeds(
+          xSpeed,
+          ySpeed,
+          thetaController.calculate(currentHeadingAngleRadians, targetHeadingAngleRadians)
+              * maxAngularVelocity
+      );
+  }
+
+  /** Internal function based on the user's preferred style, applies slew rate limiting */
+  private ChassisSpeeds getRawTargetSpeeds(double xSpeed, double ySpeed, double omega)
+  {
+      xSpeed = xLimiter.calculate(xSpeed);
+      ySpeed = yLimiter.calculate(ySpeed);
+      omega = angleLimiter.calculate(omega);
+
+      return new ChassisSpeeds(xSpeed, ySpeed, omega);
   }
 
 
@@ -565,4 +634,38 @@ public Pose2d gettrueCoralStationPose(Station wantedstation,double vertical,doub
     this.applyRequest(()-> new SwerveRequest.SwerveDriveBrake());
 
    }
+
+
+//    public ChassisSpeeds getTargetSpeeds(double xInput, double yInput,
+//                                      double angle, double currentHeadingAngleRadians,
+//                                      double maxSpeed) 
+// {
+//     double x = xInput * maxSpeed;
+//     double y = yInput * maxSpeed;
+
+//     return getRawTargetSpeeds(x, y, angle, currentHeadingAngleRadians);
+// }
+
+// public ChassisSpeeds getRawTargetSpeeds(double xSpeed, double ySpeed,
+//                                         double targetHeadingAngleRadians,
+//                                         double currentHeadingAngleRadians)
+// {
+//     return getRawTargetSpeeds(
+//         xSpeed,
+//         ySpeed,
+//         thetaController.calculate(currentHeadingAngleRadians, targetHeadingAngleRadians)
+//             * maxAngularVelocity
+//     );
+// }
+
+// public ChassisSpeeds getRawTargetSpeeds(double xSpeed, double ySpeed, double omega)
+// {
+//     if (xLimiter != null) xSpeed = xLimiter.calculate(xSpeed);
+//     if (yLimiter != null) ySpeed = yLimiter.calculate(ySpeed);
+//     if (angleLimiter != null) omega = angleLimiter.calculate(omega);
+
+//     return new ChassisSpeeds(xSpeed, ySpeed, omega);
+// }
+
+
 }
